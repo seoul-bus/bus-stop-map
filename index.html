@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>가로변 정류소 조사원별 배정지도</title><style>/* required styles */
+<html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>가로변 정류소 조사원별 배정지도</title><script src="https://dapi.kakao.com/v2/maps/sdk.js?appkey=61fe959d723e94dcdb7fce6edaf8beb5"></script><style>/* required styles */
 
 .leaflet-pane,
 .leaflet-tile,
@@ -768,7 +768,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
   var data = window.assignmentData, boundary = window.assignmentBoundary;
   var worker = 1, day = 0, selectedStop = null, byId = Object.create(null), byWorker = [];
   var route = null;
-  var roadMap = null, roadLayer = null, roadMarkers = Object.create(null), basic = true, viewBox = null;
+  var roadMap = null, roadLayer = [], roadMarkers = Object.create(null), basic = true, viewBox = null;
   var roadBackground = null, roadTimer = null, roadToken = 0;
   var $ = function (id) { return document.getElementById(id); };
   var pad = function (n) { return ('0' + n).slice(-2); };
@@ -903,59 +903,90 @@ svg.leaflet-image-layer.leaflet-interactive path {
     if(token!==roadToken)return;
     var wasBasic = basic;
     roadToken+=1;if(roadTimer!==null){clearTimeout(roadTimer);roadTimer=null;}
-    var old=roadMap;roadMap=null;roadLayer=null;roadBackground=null;roadMarkers=Object.create(null);basic=true;viewBox=null;
-    if(old){try{old.remove();}catch(ignore){}}
+    clearRoadLayer();roadMap=null;roadLayer=[];roadBackground=null;roadMarkers=Object.create(null);basic=true;viewBox=null;
+    $('map').innerHTML='';
     drawMap();
-    if (!wasBasic) roadStatus('도로 배경을 받지 못해 기본지도로 돌아왔습니다. ‘도로지도’를 눌러 다시 시도할 수 있습니다.');
+    if (!wasBasic) roadStatus('카카오지도 배경을 받지 못해 기본지도로 돌아왔습니다. ‘카카오지도’를 눌러 다시 시도할 수 있습니다.');
+  }
+  function clearRoadLayer() {
+    Object.keys(roadMarkers).forEach(function(id){
+      var item=roadMarkers[id];
+      if(item.info){try{item.info.close();}catch(ignore){}}
+    });
+    roadLayer.forEach(function(layer){if(layer&&layer.setMap)layer.setMap(null);});
+    roadLayer=[];roadMarkers=Object.create(null);
   }
   function initRoad() {
     var token=++roadToken;
     try {
-      if(!window.L || !L.tileLayer)throw new Error('map unavailable');
-      roadStatus('도로지도를 불러오는 중입니다.');
+      if(!window.kakao || !kakao.maps)throw new Error('Kakao Maps SDK unavailable');
+      roadStatus('카카오지도를 불러오는 중입니다.');
       $('map').style.display = 'block';
       $('fallback-map').style.display = 'none';
-      roadMap=L.map('map',{preferCanvas:true,zoomControl:false,touchZoom:true,minZoom:1}).setView([37.55,126.99],11);
-      roadBackground = L.tileLayer(
-        'https://a.tile.openstreetmap.fr/hot/{z}/{x}/{y}.png',
-        {maxNativeZoom: 18, maxZoom: 20,
-          attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors · <a href="https://www.hotosm.org/">HOT</a> · <a href="https://www.openstreetmap.fr/">OpenStreetMap France</a>'}
-      );
-      roadBackground.on('tileload', function () {
+      $('map').innerHTML='';
+      roadMap=new kakao.maps.Map($('map'),{
+        center:new kakao.maps.LatLng(37.55,126.99),level:8
+      });
+      kakao.maps.event.addListener(roadMap,'tilesloaded',function(){
         if (token !== roadToken || roadTimer === null) return;
         clearTimeout(roadTimer);
         roadTimer = null;
         roadStatus('');
       });
       roadTimer = setTimeout(function () { roadFailed(token); }, 12000);
-      roadBackground.addTo(roadMap);
-      L.geoJSON(boundary,{style:{color:'#8496a9',weight:0.8,fillOpacity:0}}).addTo(roadMap);
-      roadLayer=L.layerGroup().addTo(roadMap);return true;
+      return true;
     } catch(error){roadFailed(token);return false;}
   }
   function fitWorker() {
-    if (!basic && roadMap) { roadMap.invalidateSize(); roadMap.fitBounds(bounds(points()),{padding:[35,35],maxZoom:day?17:13,animate:false}); }
+    if (!basic && roadMap) {
+      kakao.maps.event.trigger(roadMap,'resize');
+      var pp=points();
+      if(pp.length===1){roadMap.setCenter(new kakao.maps.LatLng(pp[0].lat,pp[0].lon));roadMap.setLevel(3);return;}
+      var kakaoBounds=new kakao.maps.LatLngBounds();
+      pp.forEach(function(p){kakaoBounds.extend(new kakao.maps.LatLng(p.lat,p.lon));});
+      roadMap.setBounds(kakaoBounds,45,45,45,45);
+      if(day&&roadMap.getLevel()<3)roadMap.setLevel(3);
+      if(!day&&roadMap.getLevel()<6)roadMap.setLevel(6);
+    }
     else { viewBox = null; drawBasic(); }
   }
   function drawMap() {
     if (!basic && roadMap) {
       try {
-        roadLayer.clearLayers(); roadMarkers = Object.create(null);
+        clearRoadLayer();
         var daily=currentDaily();
-        if(daily && L.polygon)L.polygon(daily.hull.map(function(v){return [v[1],v[0]];}),{color:data.dayPalette[day-1],weight:1.3,fillOpacity:.1,interactive:false}).addTo(roadLayer);
-        if (route) L.polyline(route.map(function (p) { return [p.lat, p.lon]; }),
-          {color:'#264f91', weight:3, dashArray:'5 5', interactive:false}).addTo(roadLayer);
+        if(daily){
+          var polygon=new kakao.maps.Polygon({
+            map:roadMap,path:daily.hull.map(function(v){return new kakao.maps.LatLng(v[1],v[0]);}),
+            strokeWeight:2,strokeColor:data.dayPalette[day-1],strokeOpacity:.8,
+            fillColor:data.dayPalette[day-1],fillOpacity:.1
+          });roadLayer.push(polygon);
+        }
+        if(route){
+          var line=new kakao.maps.Polyline({
+            map:roadMap,path:route.map(function(p){return new kakao.maps.LatLng(p.lat,p.lon);}),
+            strokeWeight:4,strokeColor:'#264f91',strokeOpacity:.9,strokeStyle:'shortdash'
+          });roadLayer.push(line);
+        }
         (route || points()).forEach(function (p, index) {
           var found = selectedStop && p.id === selectedStop.id;
-          var marker = L.circleMarker([p.lat,p.lon],{radius:found?8:3.8,color:found?'#aa6812':pointColor(p),weight:found?2:0.7,fillColor:found?'#ffce65':pointColor(p),fillOpacity:0.9}).addTo(roadLayer);
-          if (route) marker.bindTooltip(String(index + 1), {permanent:true, direction:'top'});
-          marker.bindPopup(popup(p),{autoPan:false}); roadMarkers[p.id] = marker;
+          var position=new kakao.maps.LatLng(p.lat,p.lon);
+          var wrap=document.createElement('div');
+          wrap.style.cssText='position:relative;width:'+(found?20:12)+'px;height:'+(found?20:12)+'px;';
+          var dot=document.createElement('button');dot.type='button';dot.setAttribute('aria-label',p.id+' '+p.name);
+          dot.style.cssText='display:block;width:100%;height:100%;padding:0;border-radius:50%;border:'+(found?'3px solid #aa6812':'1px solid #fff')+';background:'+(found?'#ffce65':pointColor(p))+';box-shadow:0 1px 3px rgba(0,0,0,.4);cursor:pointer;';
+          wrap.appendChild(dot);
+          if(route){var number=document.createElement('span');number.textContent=String(index+1);number.style.cssText='position:absolute;left:50%;bottom:calc(100% + 3px);transform:translateX(-50%);padding:2px 5px;border-radius:4px;background:#fff;color:#173568;font:bold 14px/1.25 sans-serif;box-shadow:0 1px 4px rgba(0,0,0,.35);white-space:nowrap;';wrap.appendChild(number);}
+          var overlay=new kakao.maps.CustomOverlay({map:roadMap,position:position,content:wrap,xAnchor:.5,yAnchor:.5,zIndex:found?5:3});
+          var info=new kakao.maps.InfoWindow({position:position,content:'<div style="padding:12px;min-width:230px;max-width:300px;font-size:14px;line-height:1.5">'+popup(p)+'</div>',removable:true});
+          var item={overlay:overlay,info:info,openPopup:function(){Object.keys(roadMarkers).forEach(function(id){roadMarkers[id].info.close();});info.open(roadMap);}};
+          dot.onclick=item.openPopup;roadMarkers[p.id]=item;roadLayer.push(overlay);
         });
         $('map-state').textContent = worker ? '조사원 '+pad(worker)+(day?' · '+day+'일차':' · 전체 21일차')+' · '+points().length+'개소' : '10명 전체 배정';
       } catch (error) { roadFailed(roadToken);return; }
     }
     $('map').style.display = basic ? 'none' : 'block'; $('fallback-map').style.display = basic ? 'block' : 'none';
-    $('map-mode').textContent = basic ? '도로지도' : '기본지도';
+    $('map-mode').textContent = basic ? '카카오지도' : '기본지도';
     if (basic) drawBasic(); fitWorker();
   }
   var listLimit = 80;
@@ -1042,20 +1073,20 @@ svg.leaflet-image-layer.leaflet-interactive path {
   $('show-stop-day').onclick=function(){if(selectedStop){selectWorker(selectedStop.w,true,selectedStop.day);$('map-wrap').scrollIntoView({block:'start'});}};
   $('ars').oninput=function(){this.value=this.value.replace(/[^0-9]/g,'').slice(0,5);};
   $('ars').onpaste=function(e){var clipboard=e.clipboardData||window.clipboardData;if(!clipboard)return;e.preventDefault();this.value=clipboard.getData('text').replace(/[^0-9]/g,'').slice(0,5);};
-  $('focus-stop').onclick=function(){if(!selectedStop)return;if(!basic&&roadMap){roadMap.setView([selectedStop.lat,selectedStop.lon],16,{animate:false});openStop(selectedStop);}else{var p=xy(selectedStop.lon,selectedStop.lat);viewBox=[p[0]-.008,p[1]-.006,.016,.012];drawBasic();openStop(selectedStop);}$('map-wrap').scrollIntoView({block:'start'});};
+  $('focus-stop').onclick=function(){if(!selectedStop)return;if(!basic&&roadMap){roadMap.setCenter(new kakao.maps.LatLng(selectedStop.lat,selectedStop.lon));roadMap.setLevel(3);openStop(selectedStop);}else{var p=xy(selectedStop.lon,selectedStop.lat);viewBox=[p[0]-.008,p[1]-.006,.016,.012];drawBasic();openStop(selectedStop);}$('map-wrap').scrollIntoView({block:'start'});};
   $('fit-worker').onclick=fitWorker;
   $('map-mode').onclick = function () {
     if (basic) {
       basic = false;
       if (!roadMap && !initRoad()) return;
-      if (roadTimer !== null) roadStatus('도로지도를 불러오는 중입니다.');
+      if (roadTimer !== null) roadStatus('카카오지도를 불러오는 중입니다.');
     } else {
       basic = true;
       roadStatus('');
     }
     drawMap();
   };
-  function zoom(f){if(!basic&&roadMap){f<1?roadMap.zoomIn():roadMap.zoomOut();return;}var b=viewBox||areaBox();viewBox=[b[0]+b[2]*(1-f)/2,b[1]+b[3]*(1-f)/2,b[2]*f,b[3]*f];drawBasic();}
+  function zoom(f){if(!basic&&roadMap){roadMap.setLevel(Math.max(1,roadMap.getLevel()+(f<1?-1:1)));return;}var b=viewBox||areaBox();viewBox=[b[0]+b[2]*(1-f)/2,b[1]+b[3]*(1-f)/2,b[2]*f,b[3]*f];drawBasic();}
   $('zoom-in').onclick=function(){zoom(.7);};$('zoom-out').onclick=function(){zoom(1/.7);};
   var svg = $('fallback-map');
   var pointers = new Map();
@@ -1139,7 +1170,9 @@ svg.leaflet-image-layer.leaflet-interactive path {
     if (id && byId[id]) openStop(byId[id]);
   };
   $('download').onclick=function(){var quote=function(x){return '"'+String(x==null?'':x).replace(/"/g,'""')+'"';};var rows=[['조사원','조사일차','일차내순번','목록번호','자치구','정류소ID','정류소명','배정권역','비고','경도','위도','카카오맵URL']].concat(points().map(function(p){return [p.w,p.day,p.daySeq,p.seq,p.gu,p.id,p.name,p.region,p.note,p.lon,p.lat,p.url];}));var blob=new Blob(['\ufeff'+rows.map(function(r){return r.map(quote).join(',');}).join('\r\n')],{type:'text/csv;charset=utf-8'});var a=document.createElement('a'),url=URL.createObjectURL(blob);a.href=url;a.download=(worker?pad(worker)+'번'+(day?'_'+pad(day)+'일차':''):'전체')+'_정류소목록.csv';document.body.appendChild(a);a.click();a.remove();setTimeout(function(){URL.revokeObjectURL(url);},1000);};
-  roadStatus('');basic=true;selectWorker(1,false);
-  window.addEventListener('resize',function(){if(roadMap&&!basic)roadMap.invalidateSize();});
+  var footer=document.querySelector('.map-footer');
+  if(footer)footer.textContent='정류소: 서울특별시 버스정류소 위치정보(2026-09-02), 원자료 명칭·대상(2026-09-30), 보완 좌표 22-342·24-900 서울시 버스정보 조회(2026-10-23). 카카오지도 배경은 인터넷 연결이 필요하며, 기본지도는 인터넷 연결 없이 사용할 수 있습니다.';
+  roadStatus('카카오지도를 불러오는 중입니다.');basic=false;if(!initRoad())basic=true;selectWorker(1,false);
+  window.addEventListener('resize',function(){if(roadMap&&!basic)kakao.maps.event.trigger(roadMap,'resize');});
 })();
 </script></body></html>
