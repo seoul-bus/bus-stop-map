@@ -671,15 +671,24 @@ svg.leaflet-image-layer.leaflet-interactive path {
 #daily-section .daily-collapse, #daily-section[open] .daily-expand { display: none; }
 #daily-section[open] .daily-collapse { display: inline; }
 .bottom-search { padding: 0 18px 14px; }
+@media (width > 800px) {
+  .layout { grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); }
+}
 .assignment-summary { display: flex; align-items: center; gap: 10px; }
 .assignment-summary-text { flex: 1; min-width: 0; }
 .assignment-actions { display: grid; gap: 8px; }
 .inspection-progress { margin: 8px 0 12px; padding: 10px 12px; background: #edf4f8; border-radius: 8px; }
 .inspection-progress progress { display: block; width: 100%; margin: 5px 0; accent-color: #137454; }
-.inspection-progress a, #supplements .stop-directions { display: inline-block; padding: 8px 0; }
-#supplements .inspection-list li { white-space: normal; padding: 8px 0; border-bottom: 1px solid #e4eaf0; }
-.inspection-stop-row { display: flex; align-items: flex-start; gap: 8px; }
-.inspection-stop-row > a { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.inspection-progress a { display: inline-block; padding: 8px 0; }
+#supplements .inspection-list { overflow: visible; padding-inline-start: 1.6em; }
+#supplements .inspection-list li { white-space: normal; padding: 8px; border-bottom: 1px solid #e4eaf0; }
+.inspection-stop-row { overflow-wrap: anywhere; }
+#supplements .list > li > a, #supplements .inspection-stop-row > a { font-size: 18px; }
+.inspection-actions { display: flex; justify-content: flex-end; align-items: center; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
+#supplements .inspection-actions .inspection-action { display: inline-flex; align-items: center; min-height: 44px; padding: 4px 10px; border: 1px solid transparent; border-radius: 6px; font-size: .9em; font-weight: bold; text-decoration: none; white-space: nowrap; }
+#supplements .inspection-actions .stop-directions { background: #f4ead5; color: #624b20; border-color: #d7c5a1; }
+#supplements .inspection-actions .stop-submit { background: #f2e3e7; color: #783344; border-color: #dcbac4; }
+.inspection-next { background: #edf7f2; box-shadow: inset 0 0 0 2px #137454; border-radius: 6px; scroll-margin-top: 12px; }
 .inspection-check { display: inline-flex; min-height: 44px; align-items: center; gap: 4px; flex: none; white-space: nowrap; }
 .inspection-check input { width: 19px; height: 19px; accent-color: #137454; }
 .inspection-done .inspection-stop-row > a { color: #476657; }
@@ -704,7 +713,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
   color: #fff;
   text-decoration: none;
 }
-#route[aria-pressed="true"] { background: #fff; color: #243b53; }
+#route[hidden], #submit-inspection[hidden] { display: none; }
 #ars { font-variant-numeric: tabular-nums; }
 @media (max-width: 600px) {
   body { font-size: 18px; }
@@ -741,6 +750,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
   }
   #supplements .list li { white-space: nowrap; }
   #supplements .list a { display: inline-block; padding: 7px 0; }
+  #supplements .list > li > a, #supplements .inspection-stop-row > a { font-size: 21px; }
   #supplements .stop-district, #supplements .day-sequence { display: none; }
   .mobile-list-help { display: block !important; }
 }
@@ -1157,7 +1167,8 @@ svg.leaflet-image-layer.leaflet-interactive path {
   function renderList() {
     var pp = route || points(), box = $('supplements'); box.innerHTML = '';
     var title = document.createElement('h3'); title.textContent = (route ? day+'일차 도보 방문 순서 · ' : day?day+'일차 점검 ':'담당 정류소 ')+pp.length+'개소'; box.appendChild(title);
-    var completed, refreshProgress, savedNotice;
+    var completed, refreshProgress, savedNotice, highlightedRow;
+    var inspectionRows = new Map();
     var inspectionKey='done:'+worker+':'+day;
     if (day) {
       if (!inspectionCache.has(inspectionKey)) {
@@ -1177,6 +1188,9 @@ svg.leaflet-image-layer.leaflet-interactive path {
         bar.value=done;
         count.textContent='점검완료 '+done+' / '+pp.length+'개소 ('+Math.round(done/pp.length*100)+'%)';
         var upcoming=pp.find(function(p){return !completed.has(p.id);});
+        if (highlightedRow) highlightedRow.classList.remove('inspection-next');
+        highlightedRow=upcoming && inspectionRows.get(upcoming.id);
+        if (highlightedRow) highlightedRow.classList.add('inspection-next');
         next.replaceChildren();
         if (!upcoming) {next.textContent='오늘 배정된 정류소를 모두 체크했습니다.';return;}
         var jump=document.createElement('a');
@@ -1184,7 +1198,6 @@ svg.leaflet-image-layer.leaflet-interactive path {
         jump.textContent='다음 정류소 · '+upcoming.id+' '+upcoming.name;
         next.appendChild(jump);
       };
-      refreshProgress();
     }
     if (walking || walkingMessage) {
       var note = document.createElement('p');
@@ -1222,10 +1235,13 @@ svg.leaflet-image-layer.leaflet-interactive path {
       district.className = 'stop-district';
       district.textContent = ' · ' + p.gu;
       link.appendChild(district);
+      var actions, label;
       if (day) {
         li.id='inspection-stop-'+p.id;
+        inspectionRows.set(p.id,li);
         var row=document.createElement('div');row.className='inspection-stop-row';
-        var label=document.createElement('label');label.className='inspection-check';
+        actions=document.createElement('div');actions.className='inspection-actions';
+        label=document.createElement('label');label.className='inspection-check';
         var check=document.createElement('input');check.type='checkbox';check.checked=completed.has(p.id);
         check.setAttribute('aria-label',p.id+' '+p.name+' 점검완료');
         label.append(check,document.createTextNode('완료'));
@@ -1238,7 +1254,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
           }
           refreshProgress();
         };
-        row.append(link,label);li.appendChild(row);
+        row.appendChild(link);li.appendChild(row);
       } else li.appendChild(link);
       if (walking) {
         var leg=document.createElement('span');
@@ -1248,29 +1264,35 @@ svg.leaflet-image-layer.leaflet-interactive path {
       }
       if (day && index > 0 && index < pp.length - 1) {
         var directions=directionsLink(p,pp[index-1]);
-        directions.className='stop-directions';
+        directions.className='inspection-action stop-directions';
         directions.setAttribute('aria-label',p.id+' '+p.name+' 카카오맵 길찾기');
-        li.appendChild(directions);
+        actions.appendChild(directions);
+      }
+      if (day) {
+        var submit=$('submit-inspection').cloneNode(false);
+        submit.removeAttribute('id');
+        submit.removeAttribute('hidden');
+        submit.className='inspection-action stop-submit';
+        submit.textContent='결과 제출';
+        submit.setAttribute('aria-label',p.id+' '+p.name+' 점검결과 제출');
+        actions.append(submit,label);
+        li.appendChild(actions);
       }
       ul.appendChild(li);
     });
     box.appendChild(ul);
+    if (refreshProgress) refreshProgress();
     if (!worker && listLimit < pp.length) { var more = document.createElement('button'); more.type='button'; more.textContent='목록 더 보기 ('+Math.min(listLimit,pp.length)+'/'+pp.length+')'; more.onclick=function(){listLimit+=100;renderList();};box.appendChild(more); }
   }
   function updateRouteButton() {
     var button = $('route');
-    button.hidden = !day;
-    button.textContent = walkingRequest ? '도보 계산 중…' : route ? '기존 순서 보기' : '도보 동선 보기';
+    $('submit-inspection').hidden = Boolean(day);
+    button.hidden = !day || Boolean(route);
+    button.textContent = walkingRequest ? '도보 계산 중…' : walkingMessage ? '도보 동선 다시 계산' : '도보 동선 보기';
     button.disabled = Boolean(walkingRequest);
-    button.setAttribute('aria-pressed', String(Boolean(route)));
   }
   $('route').onclick = async function () {
-    if (!day || walkingRequest) return;
-    if (route) {
-      route=null;walking=null;walkingMessage='';
-      updateRouteButton();renderList();drawMap();
-      return;
-    }
+    if (!day || walkingRequest || route) return;
     var key=worker+':'+day, stops=points(), request=new AbortController();
     var storageKey=walkingStorageKey(key,stops);
     walkingRequest=request;
