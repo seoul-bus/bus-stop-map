@@ -767,8 +767,13 @@ svg.leaflet-image-layer.leaflet-interactive path {
   'use strict';
   var data = window.assignmentData, boundary = window.assignmentBoundary;
   var worker = 1, day = 0, selectedStop = null, byId = Object.create(null), byWorker = [];
-  var route = null;
+  var route = null, walking = null, walkingRequest = null, walkingMessage = '';
+  var walkingCache = new Map();
+  var pilotWalking = {"ids":["12234","12233","12235","12232","12236","12231","12441","12230","12237","12456","12432","12455","12433","12431","12457","12442","12434","12453","12435","12430","12426","12240","12227","12238","12229","12239","12440","12464","12437"],"shapes":["manyfAycccqFH`@","canyfAwbccqFlS~lApKfn@fOrf@~ItSlA~B","mblyfAee}bqFbHfNbHxI","epkyfAck|bqFrIrKlXlW`g@hc@hXfVh]lZ`WbTdLjJxXrU","kmeyfA}wvbqFdH`G","edeyfA{ovbqFtT~QnIdIdBzA`CrBha@h^fb@h^tDjC","oqayfAeisbqFlSpNrGrEhN|HjJvEvCtCbB`AfFdCzA|@jB|BFzGdB`QrBbh@VbI","q|~xfAicobqFf@nPRhG^dGbDSZdHfEfi@b@xZ","il~xfAurkbqFl@ha@NfkAxDRnO`A","at}xfAmahbqFtAHdPlBlFhAa@xBYnBbDh@lHlBfI`EzGxF|AtAvAxAvCjDjJzNfAhB","{`{xfAkcfbqFbFpIbBnCbDlDbAiAfBeB`DjD~LpF","ayyxfAmgebqF|HlDfD`BlR`Pt]zf@lA~AdArArX_Z","oyvxfAk{cbqFsX~Y`c@|t@","aovxfAmjabqFjEpH|BjDhClEkAlAqAnA|CpFxAzBhKbQ","iquxfAqr_bqF`_@jn@|AiBhAsApH}I","mbtxfAat~aqFhTiWjAuAx@iB`HqRdCmSPsS@wBAwBXaHpAgItCsJnD{F_CoE","qqrxfAyccbqF~BnEoDzFuCrJqAfIY`H@vBAvBQrSeClSaHpRy@hBx@vA`@t@_A|Aa]fc@bHjM","y~sxfAau}aqF~Ph[nArB`BjC~AfCtD`GlHvM`KnQxAzCnAvDp@lBfHdZz@pD","awqxfAktyaqFvCxLl@hCl@fCbCvJkATgAP~BxKfC|N","ugqxfAgtwaqF\\jBnK~v@zAj`@i{@bFwPb@yCAoBAw]b@_Dq{@uFa]K_@","qytxfA{iwaqFkH}YoCtAoBvAsCoG","qouxfA{gxaqFqMsYal@gfAdBkB`CaBw^_n@","ucxxfAe_}aqFmRu[yn@ccAwBhCxQfY","{wyxfAma_bqFyQgYiC_ExBkCaCsDo`@{i@eS_Y","}d|xfAqpbbqFeIaLeCxCcCpCuS}YwBgD","{o}xfAmtcbqFiDkFgIsSiFaVoCeOeCa^?}ZAaQg@kiAa@cd@m@sWmEms@bDSYiGaAoOa@g]xCuElRyYtMuWjD_@vH}A","mb}xfAcwqbqFvIgBrY}JlO{HbDyB`EgCz\\wVmBuDzGkFlVcU~QiPd\\qYnm@ie@dFyB`IsBpJgCfUiCtY_@jQr@zJrBpFfAzo@dTzw@pXaAnEj@Vjc@tRhElD","u`nxfAw_ubqFjW|SvAsCrAwBi\\kZaB{@"],"meters":[1,291,49,429,19,250,269,170,195,186,91,220,159,105,124,236,293,223,103,475,71,276,240,217,108,706,981,138]};
+  if (pilotWalking) walkingCache.set('1:8', pilotWalking);
+  var nextWalkingRequest = 0;
   var roadMap = null, roadLayer = [], roadMarkers = Object.create(null), basic = true, viewBox = null;
+  var workerMapWasBasic = true;
   var roadBackground = null, roadTimer = null, roadToken = 0;
   var $ = function (id) { return document.getElementById(id); };
   var pad = function (n) { return ('0' + n).slice(-2); };
@@ -853,8 +858,113 @@ svg.leaflet-image-layer.leaflet-interactive path {
     }
     return best;
   }
+  function decodeWalkingShape(encoded) {
+    var path = [], offset = 0, lat = 0, lon = 0;
+    function delta() {
+      var value = 0, shift = 0, chunk;
+      do {
+        if (offset >= encoded.length || shift > 30) throw new Error('Invalid route shape');
+        chunk = encoded.charCodeAt(offset++) - 63;
+        value |= (chunk & 31) << shift;
+        shift += 5;
+      } while (chunk >= 32);
+      return value & 1 ? ~(value >> 1) : value >> 1;
+    }
+    while (offset < encoded.length) {
+      lat += delta(); lon += delta();
+      path.push({lat:lat / 1e6, lon:lon / 1e6});
+    }
+    return path;
+  }
+  async function requestWalking(endpoint, input, signal) {
+    var wait = Math.max(0, nextWalkingRequest - Date.now());
+    if (wait) await new Promise(function(resolve){setTimeout(resolve,wait);});
+    signal.throwIfAborted();
+    nextWalkingRequest = Date.now() + 1250;
+    var response = await fetch('https://valhalla1.openstreetmap.de/'+endpoint+'?json='+encodeURIComponent(JSON.stringify(input)), {
+      signal:AbortSignal.any([signal,AbortSignal.timeout(16000)])
+    });
+    if (!response.ok) throw new Error('Routing HTTP '+response.status);
+    return response.json();
+  }
+  async function calculateWalking(stops, signal) {
+    var baseline = recommendRoute(stops).map(function(p){return stops.indexOf(p);});
+    var locations = stops.map(function(p){return {lat:p.lat,lon:p.lon};});
+    var count = stops.length;
+    var times = locations.map(function(){return [];});
+    for (var row=0;row<count;row+=10) {
+      for (var col=0;col<count;col+=10) {
+        var result = await requestWalking('sources_to_targets', {
+          sources:locations.slice(row,row+10), targets:locations.slice(col,col+10),
+          costing:'pedestrian', verbose:false
+        },signal);
+        var block = result.sources_to_targets.durations;
+        if (block.length !== Math.min(10,count-row)) throw new Error('Incomplete matrix');
+        block.forEach(function(values,i){
+          if (values.length !== Math.min(10,count-col)) throw new Error('Incomplete matrix row');
+          values.forEach(function(value,j){
+            times[row+i][col+j] = Number.isFinite(value) && value >= 0 ? value : Infinity;
+          });
+        });
+      }
+    }
+    function score(order) {
+      return order.slice(1).reduce(function(sum,to,i){return sum+times[order[i]][to];},0);
+    }
+    var first=baseline[0], last=baseline[count-1];
+    var remaining=baseline.slice(1,-1), nearest=[first];
+    while (remaining.length) {
+      var from=nearest[nearest.length-1];
+      remaining.sort(function(a,b){return times[from][a]-times[from][b];});
+      nearest.push(remaining.shift());
+    }
+    nearest.push(last);
+    function improve(order) {
+      var cost=score(order);
+      while (true) {
+        var better=order, betterCost=cost;
+        for (var a=1;a<count-1;a++) {
+          for (var b=1;b<count-1;b++) {
+            if (a===b) continue;
+            var moved=order.slice();
+            moved.splice(b,0,moved.splice(a,1)[0]);
+            var test=score(moved);
+            if (test<betterCost) {better=moved;betterCost=test;}
+            if (a<b) {
+              var reversed=order.slice(0,a).concat(order.slice(a,b+1).reverse(),order.slice(b+1));
+              test=score(reversed);
+              if (test<betterCost) {better=reversed;betterCost=test;}
+            }
+          }
+        }
+        if (better===order) return order;
+        order=better;cost=betterCost;
+      }
+    }
+    var order=[baseline,nearest].map(improve).sort(function(a,b){return score(a)-score(b);})[0];
+    if (!Number.isFinite(score(order))) throw new Error('No connected walking route');
+    var shapes=[], meters=[];
+    for (var i=0;i<count-1;i+=9) {
+      var segment=order.slice(i,i+10);
+      var response=await requestWalking('route',{
+        locations:segment.map(function(index){return locations[index];}),
+        costing:'pedestrian',directions_type:'none',units:'kilometers'
+      },signal);
+      var legs=response.trip.legs;
+      if (legs.length!==segment.length-1) throw new Error('Incomplete route');
+      legs.forEach(function(leg){
+        var length=leg.summary.length;
+        if (typeof leg.shape!=='string'||!leg.shape||!Number.isFinite(length)||length<0) throw new Error('Invalid walking leg');
+        shapes.push(leg.shape); meters.push(Math.round(length*1000));
+      });
+    }
+    return {ids:order.map(function(index){return stops[index].id;}),shapes:shapes,meters:meters};
+  }
+  function mapExtentPoints() {
+    return walking ? points().concat(walking.paths.flat()) : points();
+  }
   function areaBox() {
-    var b = bounds(points()), a = xy(b[0][1], b[1][0]), z = xy(b[1][1], b[0][0]);
+    var b = bounds(mapExtentPoints()), a = xy(b[0][1], b[1][0]), z = xy(b[1][1], b[0][0]);
     var w = z[0] - a[0], h = z[1] - a[1], p = Math.max(w, h) * 0.08;
     var factor = route ? 1 : Math.pow(1 / .7, 3), width = (w + 2 * p) * factor, height = (h + 2 * p) * factor;
     return [(a[0] + z[0] - width) / 2, (a[1] + z[1] - height) / 2, width, height];
@@ -878,11 +988,12 @@ svg.leaflet-image-layer.leaflet-interactive path {
     });
     var daily=currentDaily();
     if(daily)svg.appendChild(tag('polygon',{points:daily.hull.map(function(v){return xy(v[0],v[1]).join(',');}).join(' '),fill:data.dayPalette[day-1],'fill-opacity':.12,stroke:data.dayPalette[day-1],'stroke-width':unit*1.3,'pointer-events':'none'}));
-    if (route) svg.appendChild(tag('polyline', {
-      points: route.map(function (p) { return xy(p.lon, p.lat).join(','); }).join(' '),
-      fill: 'none', stroke: '#264f91', 'stroke-width': unit * 2,
-      'stroke-dasharray': unit * 5 + ' ' + unit * 3, 'pointer-events': 'none'
-    }));
+    if (walking) walking.paths.forEach(function(path){
+      svg.appendChild(tag('polyline', {
+        points:path.map(function(p){return xy(p.lon,p.lat).join(',');}).join(' '),
+        fill:'none',stroke:'#137454','stroke-width':unit*2.5,'pointer-events':'none'
+      }));
+    });
     (route || points()).forEach(function (p, index) {
       var v = xy(p.lon,p.lat), found = selectedStop && selectedStop.id === p.id;
       svg.appendChild(tag('circle', {cx:v[0],cy:v[1],r:unit*(found?8:3.2),fill:found?'#ffce65':pointColor(p),stroke:found?'#a76512':'white','stroke-width':unit*(found?2:0.4),'data-id':p.id}));
@@ -940,7 +1051,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
   function fitWorker() {
     if (!basic && roadMap) {
       kakao.maps.event.trigger(roadMap,'resize');
-      var pp=points();
+      var pp=mapExtentPoints();
       if(pp.length===1){roadMap.setCenter(new kakao.maps.LatLng(pp[0].lat,pp[0].lon));roadMap.setLevel(3);return;}
       var kakaoBounds=new kakao.maps.LatLngBounds();
       pp.forEach(function(p){kakaoBounds.extend(new kakao.maps.LatLng(p.lat,p.lon));});
@@ -962,12 +1073,12 @@ svg.leaflet-image-layer.leaflet-interactive path {
             fillColor:data.dayPalette[day-1],fillOpacity:.1
           });roadLayer.push(polygon);
         }
-        if(route){
+        if(walking) walking.paths.forEach(function(path){
           var line=new kakao.maps.Polyline({
-            map:roadMap,path:route.map(function(p){return new kakao.maps.LatLng(p.lat,p.lon);}),
-            strokeWeight:4,strokeColor:'#264f91',strokeOpacity:.9,strokeStyle:'shortdash'
+            map:roadMap,path:path.map(function(p){return new kakao.maps.LatLng(p.lat,p.lon);}),
+            strokeWeight:4,strokeColor:'#137454',strokeOpacity:.9
           });roadLayer.push(line);
-        }
+        });
         (route || points()).forEach(function (p, index) {
           var found = selectedStop && p.id === selectedStop.id;
           var position=new kakao.maps.LatLng(p.lat,p.lon);
@@ -986,17 +1097,25 @@ svg.leaflet-image-layer.leaflet-interactive path {
       } catch (error) { roadFailed(roadToken);return; }
     }
     $('map').style.display = basic ? 'none' : 'block'; $('fallback-map').style.display = basic ? 'block' : 'none';
+    $('map-mode').hidden = !worker;
     $('map-mode').textContent = basic ? '카카오지도' : '기본지도';
-    if (basic) drawBasic(); fitWorker();
+    fitWorker();
   }
   var listLimit = 80;
   function renderList() {
     var pp = route || points(), box = $('supplements'); box.innerHTML = '';
-    var title = document.createElement('h3'); title.textContent = (route ? day+'일차 추천 방문 순서 · ' : day?day+'일차 점검 ':'담당 정류소 ')+pp.length+'개소'; box.appendChild(title);
-    if (route) {
+    var title = document.createElement('h3'); title.textContent = (route ? day+'일차 도보 방문 순서 · ' : day?day+'일차 점검 ':'담당 정류소 ')+pp.length+'개소'; box.appendChild(title);
+    if (walking || walkingMessage) {
       var note = document.createElement('p');
       note.className = 'day-help';
-      note.textContent = '정류소 사이 직선거리 기준입니다. 실제 이동은 도로와 횡단보도를 확인하세요.';
+      note.setAttribute('role','status');
+      if (walking) {
+        var total=walking.meters.reduce(function(sum,metres){return sum+metres;},0);
+        var distanceLabel=document.createElement('strong');
+        distanceLabel.textContent='총 도보거리 약 '+(total/1000).toFixed(2)+'km';
+        note.appendChild(distanceLabel);
+        note.appendChild(document.createTextNode(' · 정류소 사이 이동 기준 · © OpenStreetMap contributors / Valhalla'));
+      } else note.textContent=walkingMessage;
       box.appendChild(note);
     }
     var mobileHelp = document.createElement('p');
@@ -1005,7 +1124,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
     mobileHelp.textContent = '긴 정류소 이름은 목록을 옆으로 밀어 확인하세요.';
     box.appendChild(mobileHelp);
     var ul = document.createElement('ol'); ul.className = 'list';
-    (worker ? pp : pp.slice(0, listLimit)).forEach(function (p) {
+    (worker ? pp : pp.slice(0, listLimit)).forEach(function (p,index) {
       var li = document.createElement('li');
       var link = document.createElement('a');
       link.href = p.url;
@@ -1023,6 +1142,12 @@ svg.leaflet-image-layer.leaflet-interactive path {
       district.textContent = ' · ' + p.gu;
       link.appendChild(district);
       li.appendChild(link);
+      if (walking) {
+        var leg=document.createElement('span');
+        leg.style.cssText='display:block;font-size:.9em;color:#405a50';
+        leg.textContent=index?'이전 정류소에서 '+walking.meters[index-1].toLocaleString('ko-KR')+'m':'출발 정류소';
+        li.appendChild(leg);
+      }
       ul.appendChild(li);
     });
     box.appendChild(ul);
@@ -1031,20 +1156,57 @@ svg.leaflet-image-layer.leaflet-interactive path {
   function updateRouteButton() {
     var button = $('route');
     button.hidden = !day;
-    button.textContent = route ? '기존 순서 보기' : '추천 동선 보기';
+    button.textContent = walkingRequest ? '도보 계산 중…' : route ? '기존 순서 보기' : '도보 동선 보기';
+    button.disabled = Boolean(walkingRequest);
     button.setAttribute('aria-pressed', String(Boolean(route)));
   }
-  $('route').onclick = function () {
-    if (!day) return;
-    route = route ? null : recommendRoute(points());
-    updateRouteButton();
-    renderList();
-    drawMap();
+  $('route').onclick = async function () {
+    if (!day || walkingRequest) return;
+    if (route) {
+      route=null;walking=null;walkingMessage='';
+      updateRouteButton();renderList();drawMap();
+      return;
+    }
+    var key=worker+':'+day, stops=points(), request=new AbortController();
+    walkingRequest=request;
+    walkingMessage='정류소 사이 도보 이동거리와 방문 순서를 계산하고 있습니다.';
+    updateRouteButton();renderList();
+    try {
+      var computed=walkingCache.get(key) || await calculateWalking(stops,request.signal);
+      if (walkingRequest!==request) return;
+      var paths=computed.shapes.map(decodeWalkingShape);
+      var ordered=computed.ids.map(function(id){return stops.find(function(p){return p.id===id;});});
+      if (ordered.length!==stops.length || ordered.some(function(p){return !p;}) ||
+          new Set(ordered).size!==stops.length || paths.length!==stops.length-1 ||
+          computed.meters.length!==paths.length) throw new Error('Invalid day route');
+      walkingCache.set(key,computed);
+      walking={paths:paths,meters:computed.meters};
+      route=ordered;
+      walkingMessage='';
+    } catch (error) {
+      if (walkingRequest!==request) return;
+      walkingMessage='도보 경로를 불러오지 못했습니다. 기존 점검 순서를 이용하거나 잠시 뒤 다시 시도해 주세요.';
+    }
+    walkingRequest=null;
+    updateRouteButton();renderList();drawMap();
   };
   function selectWorker(value, keepResult, dayValue) {
+    var previousWorker = worker;
     worker = Number(value); if (worker < 0 || worker > 10 || worker % 1) worker=1;
+    if (!worker && previousWorker) {
+      workerMapWasBasic = basic;
+      basic = true;
+      clearRoadLayer();
+      roadStatus('');
+    } else if (worker && !previousWorker) {
+      basic = workerMapWasBasic;
+      if (!basic && !roadMap) initRoad();
+      else if (!basic && roadTimer !== null) roadStatus('카카오지도를 불러오는 중입니다.');
+    }
     day=worker?Number(dayValue||0):0;if(day<0||day>21||day%1)day=0;
-    route=null;updateRouteButton();populateDays();
+    if (walkingRequest) walkingRequest.abort();
+    walkingRequest=null;route=null;walking=null;walkingMessage='';
+    updateRouteButton();populateDays();
     $('worker').value=String(worker); listLimit=80; $('basic-popup').hidden=true;
     if (!keepResult) { selectedStop=null; $('search-result').hidden=true; $('status').className='status'; $('status').textContent='하이픈 없이 숫자 5자리를 입력하세요.'; }
     $('panel-title').textContent=worker?'조사원 '+pad(worker)+(day?' · '+day+'일차':' 담당 영역'):'전체 배정';
@@ -1076,6 +1238,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
   $('focus-stop').onclick=function(){if(!selectedStop)return;if(!basic&&roadMap){roadMap.setCenter(new kakao.maps.LatLng(selectedStop.lat,selectedStop.lon));roadMap.setLevel(3);openStop(selectedStop);}else{var p=xy(selectedStop.lon,selectedStop.lat);viewBox=[p[0]-.008,p[1]-.006,.016,.012];drawBasic();openStop(selectedStop);}$('map-wrap').scrollIntoView({block:'start'});};
   $('fit-worker').onclick=fitWorker;
   $('map-mode').onclick = function () {
+    if (!worker) return;
     if (basic) {
       basic = false;
       if (!roadMap && !initRoad()) return;
