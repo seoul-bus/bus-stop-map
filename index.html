@@ -677,6 +677,8 @@ svg.leaflet-image-layer.leaflet-interactive path {
 .assignment-summary { display: flex; align-items: center; gap: 10px; }
 .assignment-summary-text { flex: 1; min-width: 0; }
 .assignment-actions { display: grid; gap: 8px; }
+.start-controls { display: grid; justify-items: start; gap: 4px; }
+.start-controls button { font-size: .9em; }
 .inspection-progress { margin: 8px 0 12px; padding: 10px 12px; background: #edf4f8; border-radius: 8px; }
 .inspection-progress progress { display: block; width: 100%; margin: 5px 0; accent-color: #137454; }
 .inspection-progress a { display: inline-block; padding: 8px 0; }
@@ -789,8 +791,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
   var worker = 1, day = 0, selectedStop = null, byId = Object.create(null), byWorker = [];
   var route = null, walking = null, walkingRequest = null, walkingMessage = '';
   var walkingCache = new Map();
-  var pilotWalking = {"ids":["12234","12233","12235","12232","12236","12231","12441","12230","12237","12456","12432","12455","12433","12431","12457","12442","12434","12453","12435","12430","12426","12240","12227","12238","12229","12239","12440","12464","12437"],"shapes":["manyfAycccqFH`@","canyfAwbccqFlS~lApKfn@fOrf@~ItSlA~B","mblyfAee}bqFbHfNbHxI","epkyfAck|bqFrIrKlXlW`g@hc@hXfVh]lZ`WbTdLjJxXrU","kmeyfA}wvbqFdH`G","edeyfA{ovbqFtT~QnIdIdBzA`CrBha@h^fb@h^tDjC","oqayfAeisbqFlSpNrGrEhN|HjJvEvCtCbB`AfFdCzA|@jB|BFzGdB`QrBbh@VbI","q|~xfAicobqFf@nPRhG^dGbDSZdHfEfi@b@xZ","il~xfAurkbqFl@ha@NfkAxDRnO`A","at}xfAmahbqFtAHdPlBlFhAa@xBYnBbDh@lHlBfI`EzGxF|AtAvAxAvCjDjJzNfAhB","{`{xfAkcfbqFbFpIbBnCbDlDbAiAfBeB`DjD~LpF","ayyxfAmgebqF|HlDfD`BlR`Pt]zf@lA~AdArArX_Z","oyvxfAk{cbqFsX~Y`c@|t@","aovxfAmjabqFjEpH|BjDhClEkAlAqAnA|CpFxAzBhKbQ","iquxfAqr_bqF`_@jn@|AiBhAsApH}I","mbtxfAat~aqFhTiWjAuAx@iB`HqRdCmSPsS@wBAwBXaHpAgItCsJnD{F_CoE","qqrxfAyccbqF~BnEoDzFuCrJqAfIY`H@vBAvBQrSeClSaHpRy@hBx@vA`@t@_A|Aa]fc@bHjM","y~sxfAau}aqF~Ph[nArB`BjC~AfCtD`GlHvM`KnQxAzCnAvDp@lBfHdZz@pD","awqxfAktyaqFvCxLl@hCl@fCbCvJkATgAP~BxKfC|N","ugqxfAgtwaqF\\jBnK~v@zAj`@i{@bFwPb@yCAoBAw]b@_Dq{@uFa]K_@","qytxfA{iwaqFkH}YoCtAoBvAsCoG","qouxfA{gxaqFqMsYal@gfAdBkB`CaBw^_n@","ucxxfAe_}aqFmRu[yn@ccAwBhCxQfY","{wyxfAma_bqFyQgYiC_ExBkCaCsDo`@{i@eS_Y","}d|xfAqpbbqFeIaLeCxCcCpCuS}YwBgD","{o}xfAmtcbqFiDkFgIsSiFaVoCeOeCa^?}ZAaQg@kiAa@cd@m@sWmEms@bDSYiGaAoOa@g]xCuElRyYtMuWjD_@vH}A","mb}xfAcwqbqFvIgBrY}JlO{HbDyB`EgCz\\wVmBuDzGkFlVcU~QiPd\\qYnm@ie@dFyB`IsBpJgCfUiCtY_@jQr@zJrBpFfAzo@dTzw@pXaAnEj@Vjc@tRhElD","u`nxfAw_ubqFjW|SvAsCrAwBi\\kZaB{@"],"meters":[1,291,49,429,19,250,269,170,195,186,91,220,159,105,124,236,293,223,103,475,71,276,240,217,108,706,981,138]};
-  if (pilotWalking) walkingCache.set('1:8', pilotWalking);
+  var walkingStart = null;
   var nextWalkingRequest = 0;
   // Kakao bus-stop records verified by ARS ID and Seoul boarding direction.
   var kakaoStops = {
@@ -838,9 +839,13 @@ svg.leaflet-image-layer.leaflet-interactive path {
     return [[Math.min.apply(null, ys), Math.min.apply(null, xs)], [Math.max.apply(null, ys), Math.max.apply(null, xs)]];
   }
   function popup(p) { var url=stopLink(p); return '<b>' + p.id + ' ' + esc(p.name) + '</b><br>조사원 ' + pad(p.w) + ' 담당 · ' + esc(p.gu) + '<br>' + p.day + '일차 · 일차 내 순번 ' + p.daySeq + ' · 목록번호 ' + p.seq + '<br>' + esc(p.region) + (p.note ? '<p>' + esc(p.note) + '</p>' : '') + '<p><a href="' + esc(url) + '" target="_blank" rel="noopener">' + (url.includes('busStopId=') ? '카카오맵 정류소 상세 열기' : '카카오맵에서 정류소 ID 검색') + '</a></p>'; }
+  function startAction(p) {
+    return day && p.w===worker && p.day===day && !route && !walkingRequest
+      ? '<button type="button" data-walking-start="'+esc(p.id)+'">이 정류소에서 시작</button>' : '';
+  }
   function openStop(p) {
     if (!basic && roadMarkers[p.id]) { roadMarkers[p.id].openPopup(); return; }
-    $('basic-popup').innerHTML = '<button id="close-popup" type="button" aria-label="닫기">×</button>' + popup(p);
+    $('basic-popup').innerHTML = '<button id="close-popup" type="button" aria-label="닫기">×</button>' + popup(p) + startAction(p);
     $('basic-popup').hidden = false;
     $('close-popup').onclick = function () { $('basic-popup').hidden = true; };
   }
@@ -918,7 +923,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
     if (!response.ok) throw new Error('Routing HTTP '+response.status);
     return response.json();
   }
-  async function calculateWalking(stops, signal) {
+  async function calculateWalking(stops, signal, startId) {
     var baseline = recommendRoute(stops).map(function(p){return stops.indexOf(p);});
     var locations = stops.map(function(p){return {lat:p.lat,lon:p.lon};});
     var count = stops.length;
@@ -942,20 +947,23 @@ svg.leaflet-image-layer.leaflet-interactive path {
     function score(order) {
       return order.slice(1).reduce(function(sum,to,i){return sum+times[order[i]][to];},0);
     }
-    var first=baseline[0], last=baseline[count-1];
-    var remaining=baseline.slice(1,-1), nearest=[first];
-    while (remaining.length) {
-      var from=nearest[nearest.length-1];
-      remaining.sort(function(a,b){return times[from][a]-times[from][b];});
-      nearest.push(remaining.shift());
+    var fixedStart=startId ? stops.findIndex(function(p){return p.id===startId;}) : -1;
+    function nearestFrom(first) {
+      var remaining=baseline.filter(function(index){return index!==first;});
+      var nearest=[first];
+      while (remaining.length) {
+        var from=nearest[nearest.length-1];
+        remaining.sort(function(a,b){return times[from][a]-times[from][b];});
+        nearest.push(remaining.shift());
+      }
+      return nearest;
     }
-    nearest.push(last);
     function improve(order) {
       var cost=score(order);
       while (true) {
         var better=order, betterCost=cost;
-        for (var a=1;a<count-1;a++) {
-          for (var b=1;b<count-1;b++) {
+        for (var a=fixedStart<0?0:1;a<count;a++) {
+          for (var b=fixedStart<0?0:1;b<count;b++) {
             if (a===b) continue;
             var moved=order.slice();
             moved.splice(b,0,moved.splice(a,1)[0]);
@@ -972,7 +980,10 @@ svg.leaflet-image-layer.leaflet-interactive path {
         order=better;cost=betterCost;
       }
     }
-    var order=[baseline,nearest].map(improve).sort(function(a,b){return score(a)-score(b);})[0];
+    var candidates=fixedStart<0 ? baseline.map(nearestFrom).concat([baseline,baseline.slice().reverse()])
+      : [nearestFrom(fixedStart),[fixedStart].concat(baseline.filter(function(i){return i!==fixedStart;}))];
+    var order=candidates.sort(function(a,b){return score(a)-score(b);}).slice(0,4)
+      .map(improve).sort(function(a,b){return score(a)-score(b);})[0];
     if (!Number.isFinite(score(order))) throw new Error('No connected walking route');
     var shapes=[], meters=[];
     for (var i=0;i<count-1;i+=9) {
@@ -1027,9 +1038,9 @@ svg.leaflet-image-layer.leaflet-interactive path {
     });
     (route || points()).forEach(function (p, index) {
       var v = xy(p.lon,p.lat), found = selectedStop && selectedStop.id === p.id;
-      svg.appendChild(tag('circle', {cx:v[0],cy:v[1],r:unit*(found?8:3.2),fill:found?'#ffce65':pointColor(p),stroke:found?'#a76512':'white','stroke-width':unit*(found?2:0.4),'data-id':p.id}));
+      svg.appendChild(tag('circle', {cx:v[0],cy:v[1],r:unit*(found?8:day?7:3.2),fill:found?'#ffce65':pointColor(p),stroke:found?'#a76512':'white','stroke-width':unit*(found?2:day?1:0.4),'data-id':p.id}));
       if (route) {
-        var number = tag('text', {x:v[0], y:v[1]-unit*5, 'font-size':unit*15,
+        var number = tag('text', {x:v[0], y:v[1]-unit*10, 'font-size':unit*15,
           'font-weight':'bold', 'text-anchor':'middle', fill:'#173568', stroke:'white',
           'stroke-width':unit*3, 'paint-order':'stroke', 'pointer-events':'none'});
         number.textContent = index + 1;
@@ -1114,13 +1125,18 @@ svg.leaflet-image-layer.leaflet-interactive path {
           var found = selectedStop && p.id === selectedStop.id;
           var position=new kakao.maps.LatLng(p.lat,p.lon);
           var wrap=document.createElement('div');
-          wrap.style.cssText='position:relative;width:'+(found?20:12)+'px;height:'+(found?20:12)+'px;';
+          var dotSize=found?(day?24:20):(day?18:12);
+          var hitSize=day?32:dotSize;
+          wrap.style.cssText='position:relative;width:'+hitSize+'px;height:'+hitSize+'px;';
           var dot=document.createElement('button');dot.type='button';dot.setAttribute('aria-label',p.id+' '+p.name);
-          dot.style.cssText='display:block;width:100%;height:100%;padding:0;border-radius:50%;border:'+(found?'3px solid #aa6812':'1px solid #fff')+';background:'+(found?'#ffce65':pointColor(p))+';box-shadow:0 1px 3px rgba(0,0,0,.4);cursor:pointer;';
+          dot.style.cssText='display:grid;place-items:center;width:100%;height:100%;padding:0;border:0;border-radius:50%;background:transparent;cursor:pointer;';
+          var mark=document.createElement('span');
+          mark.style.cssText='width:'+dotSize+'px;height:'+dotSize+'px;border-radius:50%;border:'+(found?'3px solid #aa6812':'1px solid #fff')+';background:'+(found?'#ffce65':pointColor(p))+';box-shadow:0 1px 3px rgba(0,0,0,.4);pointer-events:none;';
+          dot.appendChild(mark);
           wrap.appendChild(dot);
           if(route){var number=document.createElement('span');number.textContent=String(index+1);number.style.cssText='position:absolute;left:50%;bottom:calc(100% + 3px);transform:translateX(-50%);padding:2px 5px;border-radius:4px;background:#fff;color:#173568;font:bold 14px/1.25 sans-serif;box-shadow:0 1px 4px rgba(0,0,0,.35);white-space:nowrap;';wrap.appendChild(number);}
           var overlay=new kakao.maps.CustomOverlay({map:roadMap,position:position,content:wrap,xAnchor:.5,yAnchor:.5,zIndex:found?5:3});
-          var info=new kakao.maps.InfoWindow({position:position,content:'<div style="padding:12px;min-width:230px;max-width:300px;font-size:14px;line-height:1.5">'+popup(p)+'</div>',removable:true});
+          var info=new kakao.maps.InfoWindow({position:position,content:'<div style="padding:12px;min-width:230px;max-width:300px;font-size:14px;line-height:1.5">'+popup(p)+startAction(p)+'</div>',removable:true});
           var item={overlay:overlay,info:info,openPopup:function(){Object.keys(roadMarkers).forEach(function(id){roadMarkers[id].info.close();});info.open(roadMap);}};
           dot.onclick=item.openPopup;roadMarkers[p.id]=item;roadLayer.push(overlay);
         });
@@ -1153,7 +1169,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
     return link;
   }
   function walkingStorageKey(key, stops) {
-    return 'route:'+key+':'+stops.map(function(p){return [p.id,p.lat,p.lon].join(',');}).join(';');
+    return 'route:v2:'+key+':'+stops.map(function(p){return [p.id,p.lat,p.lon].join(',');}).join(';');
   }
   function validWalkingRecord(record, stops) {
     if (!record || !Array.isArray(record.ids) || !Array.isArray(record.shapes) || !Array.isArray(record.meters)) return false;
@@ -1284,7 +1300,36 @@ svg.leaflet-image-layer.leaflet-interactive path {
     if (refreshProgress) refreshProgress();
     if (!worker && listLimit < pp.length) { var more = document.createElement('button'); more.type='button'; more.textContent='목록 더 보기 ('+Math.min(listLimit,pp.length)+'/'+pp.length+')'; more.onclick=function(){listLimit+=100;renderList();};box.appendChild(more); }
   }
+  var startControls=document.createElement('div');startControls.className='start-controls';
+  var startText=document.createElement('span');startText.setAttribute('aria-live','polite');
+  var resetStart=document.createElement('button');resetStart.type='button';resetStart.textContent='출발지점 재설정';
+  startControls.append(startText,resetStart);$('route').before(startControls);
+  function refreshStartControls() {
+    startControls.hidden=!day;
+    var start=route ? route[0] : walkingStart;
+    startText.textContent=start ? '출발: '+start.id+' '+start.name : '출발: 자동 추천 (지도에서 지정 가능)';
+    resetStart.disabled=Boolean(walkingRequest);
+    resetStart.hidden=!walkingStart && !route;
+  }
+  document.addEventListener('click',function(event){
+    var button=event.target.closest('[data-walking-start]');
+    if (!button || route || walkingRequest) return;
+    var stop=byId[button.getAttribute('data-walking-start')];
+    if (!stop || !day || stop.w!==worker || stop.day!==day) return;
+    walkingStart=stop;walkingMessage='';
+    writeSaved('start:'+worker+':'+day,stop.id);
+    $('basic-popup').hidden=true;
+    Object.keys(roadMarkers).forEach(function(id){roadMarkers[id].info.close();});
+    updateRouteButton();renderList();
+  },true);
+  resetStart.onclick=function(){
+    if (walkingRequest || (route && !window.confirm('현재 도보 순서를 해제하고 출발지점을 재설정할까요? 완료 체크는 유지됩니다.'))) return;
+    walkingStart=null;route=null;walking=null;walkingMessage='';
+    writeSaved('start:'+worker+':'+day,null);
+    updateRouteButton();renderList();drawMap();
+  };
   function updateRouteButton() {
+    refreshStartControls();
     var button = $('route');
     $('submit-inspection').hidden = Boolean(day);
     button.hidden = !day || Boolean(route);
@@ -1293,18 +1338,20 @@ svg.leaflet-image-layer.leaflet-interactive path {
   }
   $('route').onclick = async function () {
     if (!day || walkingRequest || route) return;
-    var key=worker+':'+day, stops=points(), request=new AbortController();
+    var startId=walkingStart && walkingStart.id;
+    var key=worker+':'+day+':'+(startId||'auto'), stops=points(), request=new AbortController();
     var storageKey=walkingStorageKey(key,stops);
     walkingRequest=request;
     walkingMessage='정류소 사이 도보 이동거리와 방문 순서를 계산하고 있습니다.';
     updateRouteButton();renderList();
     try {
       var computed=walkingCache.get(key) || readSaved(storageKey);
+      if (startId && computed && (!Array.isArray(computed.ids) || computed.ids[0]!==startId)) computed=null;
       if (validWalkingRecord(computed,stops)) {
         try { computed.shapes.forEach(decodeWalkingShape); }
         catch (error) { computed=null; }
       }
-      if (!validWalkingRecord(computed,stops)) computed=await calculateWalking(stops,request.signal);
+      if (!validWalkingRecord(computed,stops)) computed=await calculateWalking(stops,request.signal,startId);
       if (walkingRequest!==request) return;
       if (!validWalkingRecord(computed,stops)) throw new Error('Invalid day route');
       var paths=computed.shapes.map(decodeWalkingShape);
@@ -1340,6 +1387,8 @@ svg.leaflet-image-layer.leaflet-interactive path {
     day=worker?Number(dayValue||0):0;if(day<0||day>21||day%1)day=0;
     if (walkingRequest) walkingRequest.abort();
     walkingRequest=null;route=null;walking=null;walkingMessage='';
+    var savedStart=day && byId[readSaved('start:'+worker+':'+day)];
+    walkingStart=savedStart && savedStart.w===worker && savedStart.day===day ? savedStart : null;
     updateRouteButton();populateDays();
     $('worker').value=String(worker); listLimit=80; $('basic-popup').hidden=true;
     if (!keepResult) { selectedStop=null; $('search-result').hidden=true; $('status').className='status'; $('status').textContent='하이픈 없이 숫자 5자리를 입력하세요.'; }
@@ -1464,6 +1513,16 @@ svg.leaflet-image-layer.leaflet-interactive path {
   svg.onclick = function (event) {
     if (suppressMapClick) return;
     var id = event.target.getAttribute('data-id');
+    if (!id && day) {
+      var transform=svg.getScreenCTM(), nearest=16;
+      if (transform) (route || points()).forEach(function(p){
+        var v=xy(p.lon,p.lat);
+        var x=transform.a*v[0]+transform.c*v[1]+transform.e;
+        var y=transform.b*v[0]+transform.d*v[1]+transform.f;
+        var distanceToTap=Math.hypot(event.clientX-x,event.clientY-y);
+        if (distanceToTap<nearest) { nearest=distanceToTap;id=p.id; }
+      });
+    }
     if (id && byId[id]) openStop(byId[id]);
   };
   $('download').onclick=function(){var quote=function(x){return '"'+String(x==null?'':x).replace(/"/g,'""')+'"';};var rows=[['조사원','조사일차','일차내순번','목록번호','자치구','정류소ID','정류소명','배정권역','비고','경도','위도','카카오맵URL']].concat(points().map(function(p){return [p.w,p.day,p.daySeq,p.seq,p.gu,p.id,p.name,p.region,p.note,p.lon,p.lat,p.url];}));var blob=new Blob(['\ufeff'+rows.map(function(r){return r.map(quote).join(',');}).join('\r\n')],{type:'text/csv;charset=utf-8'});var a=document.createElement('a'),url=URL.createObjectURL(blob);a.href=url;a.download=(worker?pad(worker)+'번'+(day?'_'+pad(day)+'일차':''):'전체')+'_정류소목록.csv';document.body.appendChild(a);a.click();a.remove();setTimeout(function(){URL.revokeObjectURL(url);},1000);};
